@@ -13369,9 +13369,6 @@ msgstr "Wzór podstawowy"
 msgid "Line pattern of support"
 msgstr "Liniowy wzór podpór"
 
-msgid "Rectilinear grid"
-msgstr "Siatka prostoliniowa"
-
 msgid "Hollow"
 msgstr "Wydrążony"
 
@@ -13386,9 +13383,6 @@ msgstr ""
 "Wzór linii dla warstw łączących podpory. Standardowy wzór dla warstwy "
 "łączącej podpory nierozpuszczalnej jest Prostoliniowy, natomiast dla warstwy "
 "łączącej podpory rozpuszczalnej jest Koncentryczny"
-
-msgid "Rectilinear Interlaced"
-msgstr "Prostoliniowe przeplatane"
 
 msgid "Base pattern spacing"
 msgstr "Rozstaw wzoru podstawowego"
