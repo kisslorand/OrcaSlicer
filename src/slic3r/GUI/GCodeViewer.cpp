@@ -526,7 +526,6 @@ void GCodeViewer::SequentialView::GCodeWindow::load_gcode(const std::string& fil
 
 //BBS: GUI refactor: move to right
 void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, float right, uint64_t curr_line_id) const
-//void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, uint64_t curr_line_id) const
 {
     // Orca: truncate long lines(>55 characters), add "..." at the end
     auto update_lines = [this](uint64_t start_id, uint64_t end_id) {
@@ -684,6 +683,14 @@ void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, f
     }
 
     imgui.end();
+
+    #if ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
+        imgui.set_requires_extra_frame();
+    #else
+        wxGetApp().plater()->get_current_canvas3D()->set_as_dirty();
+        wxGetApp().plater()->get_current_canvas3D()->request_extra_frame();
+    #endif
+
     ImGui::PopStyleVar();
 }
 
@@ -770,6 +777,17 @@ void GCodeViewer::init(ConfigOptionMode mode, PresetBundle* preset_bundle)
 
     m_gl_data_initialized = true;
 
+    try
+    {
+        m_viewer.init(reinterpret_cast<const char*>(glGetString(GL_VERSION)));
+        glcheck();
+    }
+    catch (const std::exception& e)
+    {
+        MessageDialog msg_dlg(wxGetApp().plater(), e.what(), _L("Error"), wxICON_ERROR | wxOK);
+        msg_dlg.ShowModal();
+    }
+
     if (preset_bundle)
         m_nozzle_nums = preset_bundle->get_printer_extruder_count();
 
@@ -782,17 +800,7 @@ void GCodeViewer::init(ConfigOptionMode mode, PresetBundle* preset_bundle)
         set_view_type(libvgcode::EViewType::ColorPrint);
     }
 
-    try
-    {
-        m_viewer.init(reinterpret_cast<const char*>(glGetString(GL_VERSION)));
-        glcheck();
-    }
-    catch (const std::exception& e)
-    {
-        MessageDialog msg_dlg(wxGetApp().plater(), e.what(), _L("Error"), wxICON_ERROR | wxOK);
-        msg_dlg.ShowModal();
-    }
-    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": finished");
+     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": finished");
 }
 
 void GCodeViewer::on_change_color_mode(bool is_dark) {
@@ -1169,9 +1177,7 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
             }
         }
 
-        enable_view_type_cache_load(false);
         set_view_type(libvgcode::EViewType::ColorPrint);
-        enable_view_type_cache_load(true);
     }
 
     bool only_gcode_3mf = false;
@@ -3093,12 +3099,15 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
             if (ImGui::BBLSelectable(view_type_items_str[i].c_str(), is_selected)) {
                 m_fold = false;
                 m_view_type_sel = i;
-                enable_view_type_cache_load(false);
                 set_view_type(view_type_items[m_view_type_sel]);
-                enable_view_type_cache_load(true);
                 reset_visible(view_type_items[m_view_type_sel]);
                 update_moves_slider();
+            #if ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
+                imgui.set_requires_extra_frame();
+            #else
                 wxGetApp().plater()->get_current_canvas3D()->set_as_dirty();
+                wxGetApp().plater()->get_current_canvas3D()->request_extra_frame();
+            #endif
             }
             if (is_selected) {
                 ImGui::SetItemDefaultFocus();
@@ -3362,7 +3371,6 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
             append_item(EItemType::Rect, color, {{ label , offsets[0] }}, true, offsets.back()/*ORCA checkbox_pos*/, visible, [this, type, visible]() {
                 m_viewer.toggle_option_visibility(type);
                 update_moves_slider();
-                wxGetApp().plater()->get_current_canvas3D()->set_as_dirty();
                 });
         };
         const bool visible = m_viewer.is_option_visible(type);
@@ -3387,256 +3395,252 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     // extrusion paths section -> items
     switch (new_view_type)
     {
-    case libvgcode::EViewType::FeatureType:
-    {
-        auto roles = m_viewer.get_extrusion_roles();
-        for (size_t i = 0; i < roles.size(); ++i) {
-            libvgcode::EGCodeExtrusionRole role = roles[i];
-            if (role >= libvgcode::EGCodeExtrusionRole::COUNT)
-                continue;
-            const bool visible = m_viewer.is_extrusion_role_visible(role);
-            std::vector<std::pair<std::string, float>> columns_offsets;
-            columns_offsets.push_back({ labels[i], offsets[0] });
-            columns_offsets.push_back({ times[i], offsets[1] });
-            columns_offsets.push_back({percents[i], offsets[2]});
-            columns_offsets.push_back({used_filaments_length[i], offsets[3]});
-            columns_offsets.push_back({used_filaments_weight[i], offsets[4]});
-            append_item(EItemType::Rect, libvgcode::convert(m_viewer.get_extrusion_role_color(role)), columns_offsets,
-                true, offsets.back(), visible, [this, role, visible]() {
-                    m_viewer.toggle_extrusion_role_visibility(role);
-                    update_moves_slider();
-                    wxGetApp().plater()->get_current_canvas3D()->set_as_dirty();
-                });
-        }
-
-        auto options = m_viewer.get_options();
-        for(auto item : options) {
-            if (item != libvgcode::EOptionType::Travels) {
-                append_option_item(item, offsets);
-            } else {
-                //BBS: show travel time in FeatureType view
-                const bool visible = m_viewer.is_option_visible(item);
+        case libvgcode::EViewType::FeatureType:
+        {
+            auto roles = m_viewer.get_extrusion_roles();
+            for (size_t i = 0; i < roles.size(); ++i) {
+                libvgcode::EGCodeExtrusionRole role = roles[i];
+                if (role >= libvgcode::EGCodeExtrusionRole::COUNT)
+                    continue;
+                const bool visible = m_viewer.is_extrusion_role_visible(role);
                 std::vector<std::pair<std::string, float>> columns_offsets;
-                columns_offsets.push_back({ _u8L("Travel"), offsets[0] });
-                columns_offsets.push_back({ travel_time, offsets[1] });
-                columns_offsets.push_back({ travel_percent, offsets[2] });
-                append_item(EItemType::Rect, libvgcode::convert(m_viewer.get_option_color(libvgcode::EOptionType::Travels)), columns_offsets, true, offsets.back()/*ORCA checkbox_pos*/, visible, [this, item, visible]() {
-                        m_viewer.toggle_option_visibility(item);
+                columns_offsets.push_back({ labels[i], offsets[0] });
+                columns_offsets.push_back({ times[i], offsets[1] });
+                columns_offsets.push_back({percents[i], offsets[2]});
+                columns_offsets.push_back({used_filaments_length[i], offsets[3]});
+                columns_offsets.push_back({used_filaments_weight[i], offsets[4]});
+                append_item(EItemType::Rect, libvgcode::convert(m_viewer.get_extrusion_role_color(role)), columns_offsets,
+                    true, offsets.back(), visible, [this, role, visible]() {
+                        m_viewer.toggle_extrusion_role_visibility(role);
                         update_moves_slider();
-                        wxGetApp().plater()->get_current_canvas3D()->set_as_dirty();
                     });
             }
+
+            auto options = m_viewer.get_options();
+            for(auto item : options) {
+                if (item != libvgcode::EOptionType::Travels) {
+                    append_option_item(item, offsets);
+                } else {
+                    //BBS: show travel time in FeatureType view
+                    const bool visible = m_viewer.is_option_visible(item);
+                    std::vector<std::pair<std::string, float>> columns_offsets;
+                    columns_offsets.push_back({ _u8L("Travel"), offsets[0] });
+                    columns_offsets.push_back({ travel_time, offsets[1] });
+                    columns_offsets.push_back({ travel_percent, offsets[2] });
+                    append_item(EItemType::Rect, libvgcode::convert(m_viewer.get_option_color(libvgcode::EOptionType::Travels)), columns_offsets, true, offsets.back()/*ORCA checkbox_pos*/, visible, [this, item, visible]() {
+                            m_viewer.toggle_option_visibility(item);
+                            update_moves_slider();
+                        });
+                }
+            }
+            break;
         }
-        break;
-    }
-    case libvgcode::EViewType::Height:                   { append_range(m_viewer.get_color_range(libvgcode::EViewType::Height), 2); break; }
-    case libvgcode::EViewType::Width:                    { append_range(m_viewer.get_color_range(libvgcode::EViewType::Width), 2); break; }
-    case libvgcode::EViewType::Speed:       {
-        append_range(m_viewer.get_color_range(libvgcode::EViewType::Speed), 0);
-        ImGui::Spacing();
-        ImGui::Dummy({ window_padding, window_padding });
-        ImGui::SameLine();
-        offsets = calculate_offsets({ { _u8L("Options"), { _u8L("Travel")}}, { _u8L("Display"), {""}} }, icon_size);
-        append_headers({ {_u8L("Options"), offsets[0] }, { _u8L("Display"), offsets[1]} });
-        const bool travel_visible = m_viewer.is_option_visible(libvgcode::EOptionType::Travels);
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 3.0f));
-        append_item(EItemType::None, libvgcode::convert(m_viewer.get_option_color(libvgcode::EOptionType::Travels)), { {_u8L("travel"), offsets[0] }}, true, predictable_icon_pos/*ORCA checkbox_pos*/, travel_visible, [this, travel_visible]() {
-            m_viewer.toggle_option_visibility(libvgcode::EOptionType::Travels);
-            // refresh(*m_gcode_result, wxGetApp().plater()->get_extruder_colors_from_plater_config(m_gcode_result));
-            update_moves_slider();
-            wxGetApp().plater()->get_current_canvas3D()->set_as_dirty();
-            });
-        ImGui::PopStyleVar(1);
-        break;
-    }
-    case libvgcode::EViewType::ActualSpeed: {
-        append_range(m_viewer.get_color_range(libvgcode::EViewType::ActualSpeed), 0);
-        ImGui::Spacing();
-        ImGui::Dummy({ window_padding, window_padding });
-        ImGui::SameLine();
-        offsets = calculate_offsets({ { _u8L("Options"), { _u8L("Travel")}}, { _u8L("Display"), {""}} }, icon_size);
-        append_headers({ {_u8L("Options"), offsets[0] }, { _u8L("Display"), offsets[1]} });
-        const bool travel_visible = m_viewer.is_option_visible(libvgcode::EOptionType::Travels);
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 3.0f));
-        append_item(EItemType::None, libvgcode::convert(m_viewer.get_option_color(libvgcode::EOptionType::Travels)), { {_u8L("travel"), offsets[0] }}, true, predictable_icon_pos/*ORCA checkbox_pos*/, travel_visible, [this, travel_visible]() {
-            m_viewer.toggle_option_visibility(libvgcode::EOptionType::Travels);
-            // refresh(*m_gcode_result, wxGetApp().plater()->get_extruder_colors_from_plater_config(m_gcode_result));
-            update_moves_slider();
-            wxGetApp().plater()->get_current_canvas3D()->set_as_dirty();
-            });
-        ImGui::PopStyleVar(1);
-        break;
-    }
-    case libvgcode::EViewType::FanSpeed:                 { append_range(m_viewer.get_color_range(libvgcode::EViewType::FanSpeed), 0); break; }
-    case libvgcode::EViewType::Temperature:              { append_range(m_viewer.get_color_range(libvgcode::EViewType::Temperature), 0); break; }
-    case libvgcode::EViewType::LayerTimeLinear:          { append_range(m_viewer.get_color_range(libvgcode::EViewType::LayerTimeLinear), true); break; }
-    case libvgcode::EViewType::LayerTimeLogarithmic:     { append_range(m_viewer.get_color_range(libvgcode::EViewType::LayerTimeLogarithmic), true); break; }
-    case libvgcode::EViewType::VolumetricFlowRate:       { append_range(m_viewer.get_color_range(libvgcode::EViewType::VolumetricFlowRate), 2); break; }
-    case libvgcode::EViewType::ActualVolumetricFlowRate: { append_range(m_viewer.get_color_range(libvgcode::EViewType::ActualVolumetricFlowRate), 2); break; }
-    case libvgcode::EViewType::Tool:
-    {
-        // shows only extruders actually used
-        char buf[64];
-        size_t i = 0;
-        const std::vector<uint8_t>& used_extruders_ids = m_viewer.get_used_extruders_ids();
-        for (uint8_t extruder_id : used_extruders_ids) {
-            ::sprintf(buf, imperial_units ? "%.2f in    %.2f g" : "%.2f m    %.2f g", model_used_filaments_m[i], model_used_filaments_g[i]);
-            append_item(EItemType::Rect, libvgcode::convert(m_viewer.get_tool_colors()[extruder_id]), { { _u8L("Extruder") + " " + std::to_string(extruder_id + 1), offsets[0]}, {buf, offsets[1]} });
-            // append_item(EItemType::Rect, libvgcode::convert(m_viewer.get_tool_colors()[extruder_id]), _u8L("Extruder") + " " + std::to_string(extruder_id + 1),
-            // true, "", 0.0f, 0.0f, offsets, used_filaments_m[extruder_id], used_filaments_g[extruder_id]);
-            i++;
+        case libvgcode::EViewType::Height:                   { append_range(m_viewer.get_color_range(libvgcode::EViewType::Height), 2); break; }
+        case libvgcode::EViewType::Width:                    { append_range(m_viewer.get_color_range(libvgcode::EViewType::Width), 2); break; }
+        case libvgcode::EViewType::Speed:       {
+            append_range(m_viewer.get_color_range(libvgcode::EViewType::Speed), 0);
+            ImGui::Spacing();
+            ImGui::Dummy({ window_padding, window_padding });
+            ImGui::SameLine();
+            offsets = calculate_offsets({ { _u8L("Options"), { _u8L("Travel")}}, { _u8L("Display"), {""}} }, icon_size);
+            append_headers({ {_u8L("Options"), offsets[0] }, { _u8L("Display"), offsets[1]} });
+            const bool travel_visible = m_viewer.is_option_visible(libvgcode::EOptionType::Travels);
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 3.0f));
+            append_item(EItemType::None, libvgcode::convert(m_viewer.get_option_color(libvgcode::EOptionType::Travels)), { {_u8L("travel"), offsets[0] }}, true, predictable_icon_pos/*ORCA checkbox_pos*/, travel_visible, [this, travel_visible]() {
+                m_viewer.toggle_option_visibility(libvgcode::EOptionType::Travels);
+                // refresh(*m_gcode_result, wxGetApp().plater()->get_extruder_colors_from_plater_config(m_gcode_result));
+                update_moves_slider();
+                });
+            ImGui::PopStyleVar(1);
+            break;
         }
-        break;
-    }
-    case libvgcode::EViewType::Summary:
-    {
-        char buf[64];
-        imgui.text(_u8L("Total") + ":");
-        ImGui::SameLine();
-        ::sprintf(buf, imperial_units ? "%.2f in / %.2f oz" : "%.2f m / %.2f g", ps.total_used_filament / koef, ps.total_weight / unit_conver);
-        imgui.text(buf);
+        case libvgcode::EViewType::ActualSpeed: {
+            append_range(m_viewer.get_color_range(libvgcode::EViewType::ActualSpeed), 0);
+            ImGui::Spacing();
+            ImGui::Dummy({ window_padding, window_padding });
+            ImGui::SameLine();
+            offsets = calculate_offsets({ { _u8L("Options"), { _u8L("Travel")}}, { _u8L("Display"), {""}} }, icon_size);
+            append_headers({ {_u8L("Options"), offsets[0] }, { _u8L("Display"), offsets[1]} });
+            const bool travel_visible = m_viewer.is_option_visible(libvgcode::EOptionType::Travels);
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 3.0f));
+            append_item(EItemType::None, libvgcode::convert(m_viewer.get_option_color(libvgcode::EOptionType::Travels)), { {_u8L("travel"), offsets[0] }}, true, predictable_icon_pos/*ORCA checkbox_pos*/, travel_visible, [this, travel_visible]() {
+                m_viewer.toggle_option_visibility(libvgcode::EOptionType::Travels);
+                // refresh(*m_gcode_result, wxGetApp().plater()->get_extruder_colors_from_plater_config(m_gcode_result));
+                update_moves_slider();
+                });
+            ImGui::PopStyleVar(1);
+            break;
+        }
+        case libvgcode::EViewType::FanSpeed:                 { append_range(m_viewer.get_color_range(libvgcode::EViewType::FanSpeed), 0); break; }
+        case libvgcode::EViewType::Temperature:              { append_range(m_viewer.get_color_range(libvgcode::EViewType::Temperature), 0); break; }
+        case libvgcode::EViewType::LayerTimeLinear:          { append_range(m_viewer.get_color_range(libvgcode::EViewType::LayerTimeLinear), true); break; }
+        case libvgcode::EViewType::LayerTimeLogarithmic:     { append_range(m_viewer.get_color_range(libvgcode::EViewType::LayerTimeLogarithmic), true); break; }
+        case libvgcode::EViewType::VolumetricFlowRate:       { append_range(m_viewer.get_color_range(libvgcode::EViewType::VolumetricFlowRate), 2); break; }
+        case libvgcode::EViewType::ActualVolumetricFlowRate: { append_range(m_viewer.get_color_range(libvgcode::EViewType::ActualVolumetricFlowRate), 2); break; }
+        case libvgcode::EViewType::Tool:
+        {
+            // shows only extruders actually used
+            char buf[64];
+            size_t i = 0;
+            const std::vector<uint8_t>& used_extruders_ids = m_viewer.get_used_extruders_ids();
+            for (uint8_t extruder_id : used_extruders_ids) {
+                ::sprintf(buf, imperial_units ? "%.2f in    %.2f g" : "%.2f m    %.2f g", model_used_filaments_m[i], model_used_filaments_g[i]);
+                append_item(EItemType::Rect, libvgcode::convert(m_viewer.get_tool_colors()[extruder_id]), { { _u8L("Extruder") + " " + std::to_string(extruder_id + 1), offsets[0]}, {buf, offsets[1]} });
+                // append_item(EItemType::Rect, libvgcode::convert(m_viewer.get_tool_colors()[extruder_id]), _u8L("Extruder") + " " + std::to_string(extruder_id + 1),
+                // true, "", 0.0f, 0.0f, offsets, used_filaments_m[extruder_id], used_filaments_g[extruder_id]);
+                i++;
+            }
+            break;
+        }
+        case libvgcode::EViewType::Summary:
+        {
+            char buf[64];
+            imgui.text(_u8L("Total") + ":");
+            ImGui::SameLine();
+            ::sprintf(buf, imperial_units ? "%.2f in / %.2f oz" : "%.2f m / %.2f g", ps.total_used_filament / koef, ps.total_weight / unit_conver);
+            imgui.text(buf);
 
-        ImGui::Dummy({window_padding, window_padding});
-        ImGui::SameLine();
-        imgui.text(_u8L("Cost") + ":");
-        ImGui::SameLine();
-        ::sprintf(buf, "%.2f", ps.total_cost);
-        imgui.text(buf);
+            ImGui::Dummy({window_padding, window_padding});
+            ImGui::SameLine();
+            imgui.text(_u8L("Cost") + ":");
+            ImGui::SameLine();
+            ::sprintf(buf, "%.2f", ps.total_cost);
+            imgui.text(buf);
 
-        ImGui::Dummy({window_padding, window_padding});
-        ImGui::SameLine();
-        imgui.text(_u8L("Total time") + ":");
-        ImGui::SameLine();
-        imgui.text(short_time(get_time_dhms(time_mode.time)));
-        break;
-    }
-    case libvgcode::EViewType::ColorPrint: {
-        //BBS: replace model custom gcode with current plate custom gcode
-        const std::vector<CustomGCode::Item>& custom_gcode_per_print_z = wxGetApp().is_editor() ? wxGetApp().plater()->model().get_curr_plate_custom_gcodes().gcodes : m_custom_gcode_per_print_z;
-        size_t total_items = 1;
-        // BBS: no ColorChange type, use ToolChange
-        //const std::vector<uint8_t>& used_extruders_ids = m_viewer.get_used_extruders_ids();
-        //for (uint8_t extruder_id : used_extruders_ids) {
-        //    total_items += color_print_ranges(extruder_id, custom_gcode_per_print_z).size();
-        //}
+            ImGui::Dummy({window_padding, window_padding});
+            ImGui::SameLine();
+            imgui.text(_u8L("Total time") + ":");
+            ImGui::SameLine();
+            imgui.text(short_time(get_time_dhms(time_mode.time)));
+            break;
+        }
+        case libvgcode::EViewType::ColorPrint: {
+            //BBS: replace model custom gcode with current plate custom gcode
+            const std::vector<CustomGCode::Item>& custom_gcode_per_print_z = wxGetApp().is_editor() ? wxGetApp().plater()->model().get_curr_plate_custom_gcodes().gcodes : m_custom_gcode_per_print_z;
+            size_t total_items = 1;
+            // BBS: no ColorChange type, use ToolChange
+            //const std::vector<uint8_t>& used_extruders_ids = m_viewer.get_used_extruders_ids();
+            //for (uint8_t extruder_id : used_extruders_ids) {
+            //    total_items += color_print_ranges(extruder_id, custom_gcode_per_print_z).size();
+            //}
 
-        const bool need_scrollable = static_cast<float>(total_items) * (icon_size + ImGui::GetStyle().ItemSpacing.y) > child_height;
+            const bool need_scrollable = static_cast<float>(total_items) * (icon_size + ImGui::GetStyle().ItemSpacing.y) > child_height;
 
-        // add scrollable region, if needed
-        if (need_scrollable)
-            ImGui::BeginChild("color_prints", { -1.0f, child_height }, false);
+            // add scrollable region, if needed
+            if (need_scrollable)
+                ImGui::BeginChild("color_prints", { -1.0f, child_height }, false);
 
-        // shows only extruders actually used
-        size_t i = 0;
-        const std::vector<uint8_t>& used_extruders_ids = m_viewer.get_used_extruders_ids();
-        auto tool_colors = m_viewer.get_tool_colors();
-        for (auto extruder_idx : used_extruders_ids) {
-            if (i < model_used_filaments_m.size() && i < model_used_filaments_g.size()) {
+            // shows only extruders actually used
+            size_t i = 0;
+            const std::vector<uint8_t>& used_extruders_ids = m_viewer.get_used_extruders_ids();
+            auto tool_colors = m_viewer.get_tool_colors();
+            for (auto extruder_idx : used_extruders_ids) {
+                if (i < model_used_filaments_m.size() && i < model_used_filaments_g.size()) {
+                    std::vector<std::pair<std::string, float>> columns_offsets;
+                    columns_offsets.push_back({ std::to_string(extruder_idx + 1), color_print_offsets[_u8L("Filament")]});
+
+                    char buf[64];
+                    float column_sum_m = 0.0f;
+                    float column_sum_g = 0.0f;
+                    if (displayed_columns & ColumnData::Model) {
+                        if ((displayed_columns & ~ColumnData::Model) > 0)
+                            ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", model_used_filaments_m[i], model_used_filaments_g[i] / unit_conver);
+                        else
+                            ::sprintf(buf, imperial_units ? "%.2f in    %.2f oz" : "%.2f m    %.2f g", model_used_filaments_m[i], model_used_filaments_g[i] / unit_conver);
+                        columns_offsets.push_back({ buf, color_print_offsets[_u8L("Model")] });
+                        column_sum_m += model_used_filaments_m[i];
+                        column_sum_g += model_used_filaments_g[i];
+                    }
+                    if (displayed_columns & ColumnData::Support) {
+                        ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", support_used_filaments_m[i], support_used_filaments_g[i] / unit_conver);
+                        columns_offsets.push_back({ buf, color_print_offsets[_u8L("Support")] });
+                        column_sum_m += support_used_filaments_m[i];
+                        column_sum_g += support_used_filaments_g[i];
+                    }
+                    if (displayed_columns & ColumnData::Flushed) {
+                        ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", flushed_filaments_m[i], flushed_filaments_g[i] / unit_conver);
+                        columns_offsets.push_back({ buf, color_print_offsets[_u8L("Flushed")]});
+                        column_sum_m += flushed_filaments_m[i];
+                        column_sum_g += flushed_filaments_g[i];
+                    }
+                    if (displayed_columns & ColumnData::WipeTower) {
+                        ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", wipe_tower_used_filaments_m[i], wipe_tower_used_filaments_g[i] / unit_conver);
+                        columns_offsets.push_back({ buf, color_print_offsets[_u8L("Tower")] });
+                        column_sum_m += wipe_tower_used_filaments_m[i];
+                        column_sum_g += wipe_tower_used_filaments_g[i];
+                    }
+                    if ((displayed_columns & ~ColumnData::Model) > 0) {
+                        ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", column_sum_m, column_sum_g / unit_conver);
+                        columns_offsets.push_back({ buf, color_print_offsets[_u8L("Total")] });
+                    }
+
+                    float checkbox_pos = std::max(predictable_icon_pos, color_print_offsets[_u8L("Display")]); // ORCA prefer predictable_icon_pos when header not reacing end
+                    append_item(EItemType::Rect, libvgcode::convert(tool_colors[extruder_idx]), columns_offsets, false, checkbox_pos/*ORCA*/, true, [this, extruder_idx]() {});
+                }
+                i++;
+            }
+
+            if (need_scrollable)
+                ImGui::EndChild();
+
+            // Sum of all rows
+            char buf[64];
+            if (used_extruders_ids.size() > 1) {
+                // Separator
+                ImGuiWindow* window = ImGui::GetCurrentWindow();
+                const ImRect separator(ImVec2(window->Pos.x + window_padding * 3, window->DC.CursorPos.y), ImVec2(window->Pos.x + window->Size.x - window_padding * 3, window->DC.CursorPos.y + 1.0f));
+                ImGui::ItemSize(ImVec2(0.0f, 0.0f));
+                const bool item_visible = ImGui::ItemAdd(separator, 0);
+                window->DrawList->AddLine(separator.Min, ImVec2(separator.Max.x, separator.Min.y), ImGui::GetColorU32(ImGuiCol_Separator));
+
                 std::vector<std::pair<std::string, float>> columns_offsets;
-                columns_offsets.push_back({ std::to_string(extruder_idx + 1), color_print_offsets[_u8L("Filament")]});
-
-                char buf[64];
-                float column_sum_m = 0.0f;
-                float column_sum_g = 0.0f;
+                columns_offsets.push_back({ _u8L("Total"), color_print_offsets[_u8L("Filament")]});
                 if (displayed_columns & ColumnData::Model) {
                     if ((displayed_columns & ~ColumnData::Model) > 0)
-                        ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", model_used_filaments_m[i], model_used_filaments_g[i] / unit_conver);
+                        ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_model_used_filament_m, total_model_used_filament_g / unit_conver);
                     else
-                        ::sprintf(buf, imperial_units ? "%.2f in    %.2f oz" : "%.2f m    %.2f g", model_used_filaments_m[i], model_used_filaments_g[i] / unit_conver);
+                        ::sprintf(buf, imperial_units ? "%.2f in    %.2f oz" : "%.2f m    %.2f g", total_model_used_filament_m, total_model_used_filament_g / unit_conver);
                     columns_offsets.push_back({ buf, color_print_offsets[_u8L("Model")] });
-                    column_sum_m += model_used_filaments_m[i];
-                    column_sum_g += model_used_filaments_g[i];
                 }
                 if (displayed_columns & ColumnData::Support) {
-                    ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", support_used_filaments_m[i], support_used_filaments_g[i] / unit_conver);
+                    ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_support_used_filament_m, total_support_used_filament_g / unit_conver);
                     columns_offsets.push_back({ buf, color_print_offsets[_u8L("Support")] });
-                    column_sum_m += support_used_filaments_m[i];
-                    column_sum_g += support_used_filaments_g[i];
                 }
                 if (displayed_columns & ColumnData::Flushed) {
-                    ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", flushed_filaments_m[i], flushed_filaments_g[i] / unit_conver);
-                    columns_offsets.push_back({ buf, color_print_offsets[_u8L("Flushed")]});
-                    column_sum_m += flushed_filaments_m[i];
-                    column_sum_g += flushed_filaments_g[i];
+                    ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_flushed_filament_m, total_flushed_filament_g / unit_conver);
+                    columns_offsets.push_back({ buf, color_print_offsets[_u8L("Flushed")] });
                 }
                 if (displayed_columns & ColumnData::WipeTower) {
-                    ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", wipe_tower_used_filaments_m[i], wipe_tower_used_filaments_g[i] / unit_conver);
+                    ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_wipe_tower_used_filament_m, total_wipe_tower_used_filament_g / unit_conver);
                     columns_offsets.push_back({ buf, color_print_offsets[_u8L("Tower")] });
-                    column_sum_m += wipe_tower_used_filaments_m[i];
-                    column_sum_g += wipe_tower_used_filaments_g[i];
                 }
                 if ((displayed_columns & ~ColumnData::Model) > 0) {
-                    ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", column_sum_m, column_sum_g / unit_conver);
+                    ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_model_used_filament_m + total_support_used_filament_m + total_flushed_filament_m + total_wipe_tower_used_filament_m,
+                        (total_model_used_filament_g + total_support_used_filament_g + total_flushed_filament_g + total_wipe_tower_used_filament_g) / unit_conver);
                     columns_offsets.push_back({ buf, color_print_offsets[_u8L("Total")] });
                 }
-
-                float checkbox_pos = std::max(predictable_icon_pos, color_print_offsets[_u8L("Display")]); // ORCA prefer predictable_icon_pos when header not reacing end
-                append_item(EItemType::Rect, libvgcode::convert(tool_colors[extruder_idx]), columns_offsets, false, checkbox_pos/*ORCA*/, true, [this, extruder_idx]() {});
+                append_item(EItemType::None, libvgcode::convert(tool_colors[0]), columns_offsets);
             }
-            i++;
+
+            //BBS display filament change times
+            ImGui::Dummy({window_padding, window_padding});
+            ImGui::SameLine();
+            imgui.text(_u8L("Filament change times") + ":");
+            ImGui::SameLine();
+            ::sprintf(buf, "%d", m_print_statistics.total_filament_changes);
+            imgui.text(buf);
+
+            //BBS display cost
+            ImGui::Dummy({ window_padding, window_padding });
+            ImGui::SameLine();
+            imgui.text(_u8L("Cost")+":");
+            ImGui::SameLine();
+            ::sprintf(buf, "%.2f", ps.total_cost);
+            imgui.text(buf);
+
+            break;
         }
-
-        if (need_scrollable)
-            ImGui::EndChild();
-
-        // Sum of all rows
-        char buf[64];
-        if (used_extruders_ids.size() > 1) {
-            // Separator
-            ImGuiWindow* window = ImGui::GetCurrentWindow();
-            const ImRect separator(ImVec2(window->Pos.x + window_padding * 3, window->DC.CursorPos.y), ImVec2(window->Pos.x + window->Size.x - window_padding * 3, window->DC.CursorPos.y + 1.0f));
-            ImGui::ItemSize(ImVec2(0.0f, 0.0f));
-            const bool item_visible = ImGui::ItemAdd(separator, 0);
-            window->DrawList->AddLine(separator.Min, ImVec2(separator.Max.x, separator.Min.y), ImGui::GetColorU32(ImGuiCol_Separator));
-
-            std::vector<std::pair<std::string, float>> columns_offsets;
-            columns_offsets.push_back({ _u8L("Total"), color_print_offsets[_u8L("Filament")]});
-            if (displayed_columns & ColumnData::Model) {
-                if ((displayed_columns & ~ColumnData::Model) > 0)
-                    ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_model_used_filament_m, total_model_used_filament_g / unit_conver);
-                else
-                    ::sprintf(buf, imperial_units ? "%.2f in    %.2f oz" : "%.2f m    %.2f g", total_model_used_filament_m, total_model_used_filament_g / unit_conver);
-                columns_offsets.push_back({ buf, color_print_offsets[_u8L("Model")] });
-            }
-            if (displayed_columns & ColumnData::Support) {
-                ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_support_used_filament_m, total_support_used_filament_g / unit_conver);
-                columns_offsets.push_back({ buf, color_print_offsets[_u8L("Support")] });
-            }
-            if (displayed_columns & ColumnData::Flushed) {
-                ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_flushed_filament_m, total_flushed_filament_g / unit_conver);
-                columns_offsets.push_back({ buf, color_print_offsets[_u8L("Flushed")] });
-            }
-            if (displayed_columns & ColumnData::WipeTower) {
-                ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_wipe_tower_used_filament_m, total_wipe_tower_used_filament_g / unit_conver);
-                columns_offsets.push_back({ buf, color_print_offsets[_u8L("Tower")] });
-            }
-            if ((displayed_columns & ~ColumnData::Model) > 0) {
-                ::sprintf(buf, imperial_units ? "%.2f in\n%.2f oz" : "%.2f m\n%.2f g", total_model_used_filament_m + total_support_used_filament_m + total_flushed_filament_m + total_wipe_tower_used_filament_m,
-                    (total_model_used_filament_g + total_support_used_filament_g + total_flushed_filament_g + total_wipe_tower_used_filament_g) / unit_conver);
-                columns_offsets.push_back({ buf, color_print_offsets[_u8L("Total")] });
-            }
-            append_item(EItemType::None, libvgcode::convert(tool_colors[0]), columns_offsets);
-        }
-
-        //BBS display filament change times
-        ImGui::Dummy({window_padding, window_padding});
-        ImGui::SameLine();
-        imgui.text(_u8L("Filament change times") + ":");
-        ImGui::SameLine();
-        ::sprintf(buf, "%d", m_print_statistics.total_filament_changes);
-        imgui.text(buf);
-
-        //BBS display cost
-        ImGui::Dummy({ window_padding, window_padding });
-        ImGui::SameLine();
-        imgui.text(_u8L("Cost")+":");
-        ImGui::SameLine();
-        ::sprintf(buf, "%.2f", ps.total_cost);
-        imgui.text(buf);
-
-        break;
-    }
-    default: { break; }
+        default: { break; }
     }
 
     // partial estimated printing time section
@@ -4037,6 +4041,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         default: { assert(false); break; }
         }
     }
+
     ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.1));
     ImGui::Dummy({ window_padding, window_padding });
     ImGui::SameLine();
@@ -4047,7 +4052,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     std::string prepare_str = _u8L("Prepare time");
     std::string print_str = _u8L("Model printing time");
     std::string total_str = _u8L("Total time");
- float max_len = window_padding + 2 * ImGui::GetStyle().ItemSpacing.x;
+    float max_len = window_padding + 2 * ImGui::GetStyle().ItemSpacing.x;
     if (m_viewer.get_layers_estimated_times().empty())
         max_len += ImGui::CalcTextSize(total_str.c_str()).x;
     else {
@@ -4116,26 +4121,26 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         if (can_show_mode_button(mode)) {
             if (imgui.button(label)) {
                 m_viewer.set_time_mode(mode);
-#if ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
+            #if ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
                 imgui.set_requires_extra_frame();
-#else
+            #else
                 wxGetApp().plater()->get_current_canvas3D()->set_as_dirty();
-            wxGetApp().plater()->get_current_canvas3D()->request_extra_frame();
-#endif // ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
+                wxGetApp().plater()->get_current_canvas3D()->request_extra_frame();
+            #endif // ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
             }
         }
     };
 
     switch (time_mode_id) {
-    case libvgcode::ETimeMode::Normal: {
-        show_mode_button(_u8L("Show stealth mode"), libvgcode::ETimeMode::Stealth);
-        break;
-    }
-    case libvgcode::ETimeMode::Stealth: {
-        show_mode_button(_u8L("Show normal mode"), libvgcode::ETimeMode::Normal);
-        break;
-    }
-    default : { assert(false); break; }
+        case libvgcode::ETimeMode::Normal: {
+            show_mode_button(_u8L("Show stealth mode"), libvgcode::ETimeMode::Stealth);
+            break;
+        }
+        case libvgcode::ETimeMode::Stealth: {
+            show_mode_button(_u8L("Show normal mode"), libvgcode::ETimeMode::Normal);
+            break;
+        }
+        default : { assert(false); break; }
     }
 
     if (m_viewer.get_view_type() == libvgcode::EViewType::ColorPrint) {
