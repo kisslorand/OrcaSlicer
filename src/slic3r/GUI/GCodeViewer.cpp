@@ -800,7 +800,7 @@ void GCodeViewer::init(ConfigOptionMode mode, PresetBundle* preset_bundle)
         set_view_type(libvgcode::EViewType::ColorPrint);
     }
 
-     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": finished");
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": finished");
 }
 
 void GCodeViewer::on_change_color_mode(bool is_dark) {
