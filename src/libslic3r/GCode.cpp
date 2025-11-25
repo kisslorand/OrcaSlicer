@@ -1056,16 +1056,14 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
         if (!is_approx(z, current_z)) {
             gcode += gcodegen.writer().retract();
             gcode += gcodegen.writer().travel_to_z(current_z, "Travel back up to the topmost object layer.");
-            gcode += gcodegen.writer().unretract();
-        }
-
-        else {
+        } else {
             // Prepare a future wipe.
             gcodegen.m_wipe.reset_path();
             for (const Vec2f &wipe_pt : tcr.wipe_path)
                 gcodegen.m_wipe.path.points.emplace_back(wipe_tower_point_to_object_point(gcodegen, transform_wt_pt(wipe_pt)));
-            gcode += gcodegen.retract(false, false, auto_lift_type, true);
         }
+        
+        gcode += gcodegen.retract(false, false, auto_lift_type, true);  // restore previous Z-Hop state
 
         // Let the planner know we are traveling between objects.
         gcodegen.m_avoid_crossing_perimeters.use_external_mp_once();
@@ -1186,15 +1184,14 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
         if (!is_approx(z, current_z)) {
             gcode += gcodegen.writer().retract();
             gcode += gcodegen.writer().travel_to_z(current_z, "Travel back up to the topmost object layer.");
-            gcode += gcodegen.writer().unretract();
-        }
-
-        else {
+        } else {
             // Prepare a future wipe.
             gcodegen.m_wipe.reset_path();
             for (const Vec2f& wipe_pt : tcr.wipe_path)
                 gcodegen.m_wipe.path.points.emplace_back(wipe_tower_point_to_object_point(gcodegen, transform_wt_pt(wipe_pt) + plate_origin_2d));
         }
+
+        gcode += gcodegen.retract(false, false, NormalLift, false);  // restore previous Z-Hop state
 
         // Let the planner know we are traveling between objects.
         gcodegen.m_avoid_crossing_perimeters.use_external_mp_once();
