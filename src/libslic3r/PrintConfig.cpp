@@ -1565,11 +1565,10 @@ void PrintConfigDef::init_fff_params()
     def = this->add("brim_use_efc_outline", coBool);
     def->label = L("Brim follows compensated outline");
     def->category = L("Support");
-    def->tooltip = L("Use Elephant Foot Compensation outline for brim generation.\n"
-                     "The brim is generated from the first-layer compensated geometry instead of the original model outline, ensuring contact with compensated perimeters.\n"
-                     "\n"
-                     "With aggressive or geometry-altering Elephant Foot Compensation, enabling this option may cause the brim to fuse with upper layers. "
-                     "Disabling it in such cases may leave the brim detached from the compensated first layer, reducing its effectiveness for first-layer adhesion.");
+    def->tooltip = L("When enabled, the brim is aligned with the first-layer perimeter geometry after Elephant Foot Compensation is applied.\n"
+                    "This option is intended for cases where Elephant Foot Compensation significantly alters the first-layer footprint.\n"
+                    "\n"
+                    "If your current setup already works well, enabling it may be unnecessary and can cause the brim to fuse with upper layers." );
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
