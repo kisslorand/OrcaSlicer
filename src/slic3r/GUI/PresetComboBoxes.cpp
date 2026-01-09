@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <unordered_map>
 #include <boost/algorithm/string.hpp>
 
 #include <wx/sizer.h>
@@ -1136,7 +1137,7 @@ void PlaterPresetComboBox::update()
     std::map<wxString, wxBitmap*>  project_embedded_presets;
     std::map<wxString, wxBitmap *> system_presets;
     std::map<wxString, wxBitmap *>  uncompatible_presets;
-    std::unordered_set<std::string> system_printer_models;
+    std::unordered_map<std::string, wxString> system_printer_models;
     std::map<wxString, wxString>   preset_descriptions;
     std::map<wxString, std::string> preset_filament_vendors;
     std::map<wxString, std::string> preset_filament_types;
@@ -1210,10 +1211,19 @@ void PlaterPresetComboBox::update()
             //BBS: move system to the end
             if (m_type == Preset::TYPE_PRINTER) {
                 auto printer_model = preset.config.opt_string("printer_model");
-                name = from_u8(printer_model);
-                if (system_printer_models.count(printer_model) == 0) {
+                // ORCA: Make system printer presets display the dirty "*" prefix when edited.
+                std::string display_name = printer_model;
+                if (is_selected && preset.is_dirty)
+                    display_name = Preset::suffix_modified() + display_name;
+                name = from_u8(display_name);
+                auto existing = system_printer_models.find(printer_model);
+                if (existing == system_printer_models.end()) {
                     system_presets.emplace(name, bmp);
-                    system_printer_models.insert(printer_model);
+                    system_printer_models.emplace(printer_model, name);
+                } else if (is_selected && existing->second != name) {
+                    system_presets.erase(existing->second);
+                    system_presets.emplace(name, bmp);
+                    existing->second = name;
                 }
             } else {
                 system_presets.emplace(name, bmp);
