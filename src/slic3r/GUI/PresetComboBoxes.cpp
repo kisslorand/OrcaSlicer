@@ -1202,7 +1202,11 @@ void PlaterPresetComboBox::update()
             //BBS: move system to the end
             if (m_type == Preset::TYPE_PRINTER) {
                 auto printer_model = preset.config.opt_string("printer_model");
-                name = from_u8(printer_model);
+                // ORCA: Make system printer presets display the dirty “*” prefix when edited.
+                std::string display_name = printer_model;
+                if (is_selected && preset.is_dirty)
+                    display_name = Preset::suffix_modified() + display_name;
+                name = from_u8(display_name);
                 if (system_printer_models.count(printer_model) == 0) {
                     system_presets.emplace(name, bmp);
                     system_printer_models.insert(printer_model);
