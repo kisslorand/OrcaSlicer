@@ -893,18 +893,6 @@ bool IMSlider::vertical_slider(const char* str_id, int* higher_value, int* lower
     const ImRect bg_rect = ImRect(groove.Min - ImVec2(6.0f, 6.0f) * m_scale, groove.Max + ImVec2(6.0f, 6.0f) * m_scale);
     const float mid_x = groove.GetCenter().x;
 
-    // set mouse active region.
-    const ImRect active_region = ImRect(ImVec2(draw_region.Min.x + 35.0f * m_scale, draw_region.Min.y), draw_region.Max);
-    bool hovered = ImGui::ItemHoverable(active_region, id) && !ImGui::ItemHoverable(m_tick_rect, id);
-    if (hovered && context.IO.MouseDown[0]) {
-        ImGui::SetActiveID(id, window);
-        ImGui::SetFocusID(id, window);
-        ImGui::FocusWindow(window);
-    }
-
-    // draw background
-    draw_background_and_groove(bg_rect, groove);
-
     // Processing interacting
     // set scrollable region
     const ImRect region = ImRect(bg_rect.Min + ImVec2(0.0f, handle_radius), bg_rect.Max - ImVec2(0.0f, handle_radius));
@@ -921,31 +909,125 @@ bool IMSlider::vertical_slider(const char* str_id, int* higher_value, int* lower
 
     ImRect one_handle = ImRect(higher_handle.Min - ImVec2(one_handle_offset, 0), higher_handle.Max - ImVec2(one_handle_offset, 0));
 
+    // Label hit testing enables delta-based label drag without jumping to the mouse position.
+    bool label_hovered = false;
+    SelectedSlider label_selection = ssUndef;
+    auto label_hit = [&](const ImVec2& start, const ImVec2& text_size, SelectedSlider selection_value) {
+        const ImRect label_rect(start, start + text_size);
+        if (!label_rect.Contains(context.IO.MousePos))
+            return;
+        label_hovered = true;
+        label_selection = selection_value;
+    };
+    auto label_text_size = [&](const std::string& label) {
+        return ImGui::CalcTextSize(into_u8(label).c_str()) + text_padding * 2;
+    };
+
+    if (!one_layer_flag) {
+        const ImVec2 higher_text_size = label_text_size(higher_label);
+        label_hit(ImVec2(higher_handle.Min.x - higher_text_size.x - triangle_offsets[2].x,
+                      higher_handle.GetCenter().y - higher_text_size.y),
+            higher_text_size, ssHigher);
+
+        const ImVec2 lower_text_size = label_text_size(lower_label);
+        label_hit(ImVec2(lower_handle.Min.x - lower_text_size.x - triangle_offsets[2].x,
+                      lower_handle.GetCenter().y),
+            lower_text_size, ssLower);
+    } else {
+        const ImVec2 text_size_one = label_text_size(higher_label);
+        const ImVec2 text_start_one = ImVec2(one_handle.Min.x - text_size_one.x, one_handle.GetCenter().y - 0.5f * text_size_one.y);
+        label_hit(text_start_one, text_size_one, ssHigher);
+    }
+
+    // set mouse active region.
+    const ImRect active_region = ImRect(ImVec2(draw_region.Min.x + 35.0f * m_scale, draw_region.Min.y), draw_region.Max);
+    bool hovered = ImGui::ItemHoverable(active_region, id) && !ImGui::ItemHoverable(m_tick_rect, id) && !label_hovered;
+    struct LabelDragState
+    {
+        ImGuiID        id = 0;
+        SelectedSlider selection = ssUndef;
+        ImVec2         start_mouse;
+        int            start_value = 0;
+    };
+    // Label drag state is shared between multi/single layer modes.
+    static LabelDragState label_drag;
+
+    if (label_hovered && context.IO.MouseClicked[0] && label_selection != ssUndef) {
+        selection = label_selection;
+        label_drag.id = id;
+        label_drag.selection = label_selection;
+        label_drag.start_mouse = context.IO.MousePos;
+        label_drag.start_value = label_selection == ssHigher ? *higher_value : *lower_value;
+        if (!one_layer_flag) {
+            ImGui::SetActiveID(id, window);
+            ImGui::SetFocusID(id, window);
+            ImGui::FocusWindow(window);
+        }
+    }
+    if (hovered && context.IO.MouseDown[0]) {
+        ImGui::SetActiveID(id, window);
+        ImGui::SetFocusID(id, window);
+        ImGui::FocusWindow(window);
+    }
+
+    const bool allow_interaction = context.ActiveId == id || context.IO.MouseDown[0];
+
+    // draw background
+    draw_background_and_groove(bg_rect, groove);
+
     bool value_changed = false;
     if (!one_layer_flag)
     {
-        // select higher handle by default
-        static bool h_selected = (selection == ssHigher);
-        if (ImGui::ItemHoverable(higher_handle, id) && context.IO.MouseClicked[0]) {
-            selection = ssHigher;
-            h_selected = true;
-        }
-        if (ImGui::ItemHoverable(lower_handle, id) && context.IO.MouseClicked[0]) {
-            selection = ssLower;
-            h_selected = false;
+        // Keep last selection when undefined; otherwise sync to current selection.
+        static bool h_selected = true;
+        if (selection != ssUndef)
+            h_selected = (selection == ssHigher);
+        const bool label_drag_active = label_drag.id == id && context.IO.MouseDown[0] && label_drag.selection != ssUndef;
+        if (!label_drag_active) {
+            if (ImGui::ItemHoverable(higher_handle, id) && context.IO.MouseClicked[0]) {
+                selection = ssHigher;
+                h_selected = true;
+            }
+            if (ImGui::ItemHoverable(lower_handle, id) && context.IO.MouseClicked[0]) {
+                selection = ssLower;
+                h_selected = false;
+            }
         }
 
         // update handle position and value
-        if (h_selected)
-        {
-            value_changed = slider_behavior(id, higher_slideable_region, v_min, v_max,
-                higher_value, &higher_handle, ImGuiSliderFlags_Vertical,
-                m_tick_value, m_tick_rect);
-        }
-        if (!h_selected) {
-            value_changed = slider_behavior(id, lower_slideable_region, v_min, v_max,
-                lower_value, &lower_handle, ImGuiSliderFlags_Vertical,
-                m_tick_value, m_tick_rect);
+        if (label_drag_active) {
+            const ImRect& drag_region = label_drag.selection == ssHigher ? higher_slideable_region : lower_slideable_region;
+            const float region_height = drag_region.GetHeight();
+            if (region_height > 0.0f) {
+                const float delta = context.IO.MousePos.y - label_drag.start_mouse.y;
+                const float value_delta = delta * (float)(v_max - v_min) / region_height;
+                const int new_value = (int)ImClamp((float)label_drag.start_value - value_delta, (float)v_min, (float)v_max);
+                if (label_drag.selection == ssHigher)
+                    *higher_value = new_value;
+                else
+                    *lower_value = new_value;
+                value_changed = true;
+            }
+            h_selected = (label_drag.selection == ssHigher);
+            if (label_drag.selection == ssHigher) {
+                higher_handle_pos = get_pos_from_value(v_min, v_max, *higher_value, higher_slideable_region);
+                higher_handle = ImRect(mid_x - handle_radius, higher_handle_pos - handle_radius, mid_x + handle_radius, higher_handle_pos + handle_radius);
+            } else {
+                lower_handle_pos = get_pos_from_value(v_min, v_max, *lower_value, lower_slideable_region);
+                lower_handle = ImRect(mid_x - handle_radius, lower_handle_pos - handle_radius, mid_x + handle_radius, lower_handle_pos + handle_radius);
+            }
+        } else if (allow_interaction) {
+            if (h_selected)
+            {
+                value_changed = slider_behavior(id, higher_slideable_region, v_min, v_max,
+                    higher_value, &higher_handle, ImGuiSliderFlags_Vertical,
+                    m_tick_value, m_tick_rect);
+            }
+            if (!h_selected) {
+                value_changed = slider_behavior(id, lower_slideable_region, v_min, v_max,
+                    lower_value, &lower_handle, ImGuiSliderFlags_Vertical,
+                    m_tick_value, m_tick_rect);
+            }
         }
 
         ImVec2 higher_handle_center = higher_handle.GetCenter();
@@ -1024,6 +1106,11 @@ bool IMSlider::vertical_slider(const char* str_id, int* higher_value, int* lower
         window->DrawList->AddTriangleFilled(pos_1, pos_2, pos_3, white_bg);
         ImGui::RenderText(text_start + text_padding, lower_label.c_str());
         
+        if (!context.IO.MouseDown[0] && label_drag.id == id) {
+            label_drag.id = 0;
+            label_drag.selection = ssUndef;
+        }
+
         // draw mouse position
         if (hovered) {
             draw_tick_on_mouse_position(h_selected ? higher_slideable_region : lower_slideable_region);
@@ -1032,9 +1119,32 @@ bool IMSlider::vertical_slider(const char* str_id, int* higher_value, int* lower
     if (one_layer_flag)
     {
         // update handle position
-        value_changed = slider_behavior(id, one_slideable_region, v_min, v_max,
-            higher_value, &one_handle, ImGuiSliderFlags_Vertical,
-            m_tick_value, m_tick_rect);
+        // Only move on actual drag when label-armed; avoid hover/click snaps.
+        const bool label_drag_armed = label_drag.id == id && label_drag.selection == ssHigher;
+        // Use delta drag only while the label is actively dragged to avoid snap-to-mouse.
+        const bool label_drag_active = label_drag_armed && context.IO.MouseDown[0] && ImGui::IsMouseDragging(0);
+        if (label_drag_active) {
+            const float region_height = one_slideable_region.GetHeight();
+            if (region_height > 0.0f) {
+                const float delta = context.IO.MousePos.y - label_drag.start_mouse.y;
+                const float value_delta = delta * (float)(v_max - v_min) / region_height;
+                *higher_value = (int)ImClamp((float)label_drag.start_value - value_delta, (float)v_min, (float)v_max);
+                value_changed = true;
+            }
+            higher_handle_pos = get_pos_from_value(v_min, v_max, *higher_value, higher_slideable_region);
+            higher_handle = ImRect(mid_x - handle_radius, higher_handle_pos - handle_radius, mid_x + handle_radius, higher_handle_pos + handle_radius);
+            one_handle = ImRect(higher_handle.Min - ImVec2(one_handle_offset, 0), higher_handle.Max - ImVec2(one_handle_offset, 0));
+        } else if (!label_drag_armed && !label_hovered && context.IO.MouseDown[0]) {
+            value_changed = slider_behavior(id, one_slideable_region, v_min, v_max,
+                higher_value, &one_handle, ImGuiSliderFlags_Vertical,
+                m_tick_value, m_tick_rect);
+        }
+        if (!context.IO.MouseDown[0] && label_drag_armed) {
+            label_drag.id = 0;
+            label_drag.selection = ssUndef;
+            if (context.ActiveId == id)
+                ImGui::ClearActiveID();
+        }
 
         ImVec2 handle_center = one_handle.GetCenter();
 
