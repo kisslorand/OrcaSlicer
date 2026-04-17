@@ -262,7 +262,6 @@ CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(WallSequence)
 
 //Orca
 static t_config_enum_values s_keys_map_WallDirection{
-    { "auto", int(WallDirection::Auto) },
     { "ccw",  int(WallDirection::CounterClockwise) },
     { "cw",   int(WallDirection::Clockwise)},
 };
@@ -1594,6 +1593,13 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("combine_brims", coBool);
+    def->label = L("Combine brims");
+    def->category = L("Support");
+    def->tooltip  = L("Combine multiple brims into one when they are close to each other. This can improve brim adhesion.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
     def = this->add("brim_ears", coBool);
     def->label = L("Brim ears");
     def->category = L("Support");
@@ -2019,16 +2025,14 @@ void PrintConfigDef::init_fff_params()
     def = this->add("wall_direction", coEnum);
     def->label = L("Wall loop direction");
     def->category = L("Quality");
-    def->tooltip = L("The direction which the wall loops are extruded when looking down from the top.\n\nBy default all walls are extruded in counter-clockwise, unless Reverse on even is enabled. Set this to any option other than Auto will force the wall direction regardless of the Reverse on even.\n\nThis option will be disabled if spiral vase mode is enabled.");
+    def->tooltip = L("The direction which the contour wall loops are extruded when looking down from the top.\nHoles are printed in the opposite direction to the contour to maintain alignment with layers whose contour polygons are incomplete and change direction, also partially forming the contour of a hole.\n\nThis option will be disabled if spiral vase mode is enabled.");
     def->enum_keys_map = &ConfigOptionEnum<WallDirection>::get_enum_values();
-    def->enum_values.push_back("auto");
     def->enum_values.push_back("ccw");
     def->enum_values.push_back("cw");
-    def->enum_labels.push_back(L("Auto"));
     def->enum_labels.push_back(L("Counter clockwise"));
     def->enum_labels.push_back(L("Clockwise"));
     def->mode = comAdvanced;
-    def->set_default_value(new ConfigOptionEnum<WallDirection>(WallDirection::Auto));
+    def->set_default_value(new ConfigOptionEnum<WallDirection>(WallDirection::CounterClockwise));
 
     def = this->add("extruder", coInt);
     def->gui_type = ConfigOptionDef::GUIType::i_enum_open;
@@ -3059,7 +3063,7 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Marlin Firmware Junction Deviation (replaces the traditional XY Jerk setting).");
     def->sidetext = L("mm");	// milimeters, CIS languages need translation
     def->min = 0.f;
-    def->max = 0.5f;
+    def->max = 0.3f;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(0.f));
 
@@ -4214,7 +4218,7 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Maximum junction deviation (M205 J, only apply if JD > 0 for Marlin Firmware\nIf your Marlin 2 printer uses Classic Jerk set this value to 0.)");
     def->sidetext = L("mm");	// milimeters, CIS languages need translation
     def->min = 0.f;
-    def->max = 0.5f;
+    def->max = 0.3f;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloats{ 0.01f });
 
@@ -7685,6 +7689,9 @@ void PrintConfigDef::handle_legacy(t_config_option_key &opt_key, std::string &va
     } else if (opt_key == "machine_switch_extruder_time") {
         opt_key = "machine_tool_change_time";
     }
+    else if (opt_key == "wall_direction" && value == "auto") {
+        value = "ccw";
+    }
 
     // Ignore the following obsolete configuration keys:
     static std::set<std::string> ignore = {
@@ -9000,6 +9007,10 @@ void DynamicPrintConfig::update_values_to_printer_extruders(DynamicPrintConfig& 
         //int extruder_count = opt_nozzle_diameters->size();
         auto opt_extruder_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(printer_config.option("extruder_type"));
         auto opt_nozzle_volume_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(printer_config.option("nozzle_volume_type"));
+        if (!opt_extruder_type || !opt_nozzle_volume_type) {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << boost::format(", Line %1%: extruder_type or nozzle_volume_type option not found, skipping")%__LINE__;
+            return;
+        }
         std::vector<int> variant_index;
 
         if (extruder_id > 0 && extruder_id <= static_cast<unsigned> (extruder_count)) {
@@ -9029,11 +9040,8 @@ void DynamicPrintConfig::update_values_to_printer_extruders(DynamicPrintConfig& 
                 //variant index
                 variant_index[e_index] = get_index_for_extruder(e_index+1, id_name, extruder_type, nozzle_volume_type, variant_name);
                 if (variant_index[e_index] < 0) {
-                    BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(", Line %1%: could not found extruder_type %2%, nozzle_volume_type %3%, extruder_index %4%")
-                        %__LINE__ %s_keys_names_ExtruderType[extruder_type] % s_keys_names_NozzleVolumeType[nozzle_volume_type] % (e_index+1);
-                    assert(false);
-                    //for some updates happens in a invalid state(caused by popup window)
-                    //we need to avoid crash
+                    // Orca: This is expected during transient UI states (e.g. popup windows),
+                    // fall back to 0 silently.
                     variant_index[e_index] = 0;
                 }
             }
@@ -9165,13 +9173,22 @@ void DynamicPrintConfig::update_values_to_printer_extruders_for_multiple_filamen
     if ((extruder_count > 1) || different_extruder)
     {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", Line %1%:  extruder_count=%2%, different_extruder=%3%")%__LINE__ %extruder_count %different_extruder;
-        std::vector<int> filament_maps =  printer_config.option<ConfigOptionInts>("filament_map")->values;
+        auto opt_filament_map = printer_config.option<ConfigOptionInts>("filament_map");
+        if (!opt_filament_map) {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << boost::format(", Line %1%: filament_map option not found, skipping")%__LINE__;
+            return;
+        }
+        std::vector<int> filament_maps = opt_filament_map->values;
         size_t filament_count = filament_maps.size();
         //apply process settings
         //auto opt_nozzle_diameters = this->option<ConfigOptionFloats>("nozzle_diameter");
         //int extruder_count = opt_nozzle_diameters->size();
         auto opt_extruder_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(printer_config.option("extruder_type"));
         auto opt_nozzle_volume_type = dynamic_cast<const ConfigOptionEnumsGeneric*>(printer_config.option("nozzle_volume_type"));
+        if (!opt_extruder_type || !opt_nozzle_volume_type) {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << boost::format(", Line %1%: extruder_type or nozzle_volume_type option not found, skipping")%__LINE__;
+            return;
+        }
         auto opt_ids = id_name.empty()? nullptr: dynamic_cast<const ConfigOptionInts*>(this->option(id_name));
         std::vector<int> variant_index;
 
