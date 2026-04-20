@@ -990,7 +990,9 @@ float GLVolumeCollection::get_selection_support_normal_z() const
     double angle_rad;
 
     if (support_threshold_angle > 0) {
-        angle_rad = Geometry::deg2rad(static_cast<double>(support_threshold_angle));
+        // Match support generation: explicit threshold angles are treated as inclusive.
+        const int effective_support_threshold_angle = std::min(support_threshold_angle + 1, 89);
+        angle_rad = Geometry::deg2rad(static_cast<double>(effective_support_threshold_angle));
     } else if (is_tree(support_type)) {
         angle_rad = Geometry::deg2rad(30.0); // fallback value for tree supports
     } else { // For normal supports, if the angle is set to 0, calculate normal_z from overlap.
@@ -1000,7 +1002,7 @@ float GLVolumeCollection::get_selection_support_normal_z() const
         const size_t nozzle_count        = nozzle_diameter_opt->values.size();
         const size_t wall_extruder_idx   = (wall_filament > 0 && wall_filament <= static_cast<int>(nozzle_count))
             ? static_cast<size_t>(wall_filament - 1)
-            : 0; // // Invalid extruder index falls back to extruder 1.
+            : 0; // Invalid extruder index falls back to extruder 1.
         
         // Use wall extruder's nozzle diameter for better estimation of external perimeter width,
         // which is more relevant to overhang printing than the default nozzle diameter.
@@ -1055,6 +1057,8 @@ void GLVolumeCollection::render(GLVolumeCollection::ERenderType       type,
     glsafe(::glCullFace(GL_BACK));
     if (disable_cullface)
         glsafe(::glDisable(GL_CULL_FACE));
+
+    const float support_normal_z = get_selection_support_normal_z();
 
     for (GLVolumeWithIdAndZ& volume : to_render) {
 #if ENABLE_MODIFIERS_ALWAYS_TRANSPARENT
@@ -1112,13 +1116,11 @@ void GLVolumeCollection::render(GLVolumeCollection::ERenderType       type,
             //use -1 ad a invalid type
             shader->set_uniform("print_volume.type", -1);
         }
-        
-        float normal_z = get_selection_support_normal_z();
   
         shader->set_uniform("volume_world_matrix", volume.first->world_matrix());
         shader->set_uniform("slope.actived", m_slope.isGlobalActive && !volume.first->is_modifier && !volume.first->is_wipe_tower);
         shader->set_uniform("slope.volume_world_normal_matrix", static_cast<Matrix3f>(volume.first->world_matrix().matrix().block(0, 0, 3, 3).inverse().transpose().cast<float>()));
-        shader->set_uniform("slope.normal_z", normal_z);
+        shader->set_uniform("slope.normal_z", support_normal_z);
 
 #if ENABLE_ENVIRONMENT_MAP
         unsigned int environment_texture_id = GUI::wxGetApp().plater()->get_environment_texture_id();
