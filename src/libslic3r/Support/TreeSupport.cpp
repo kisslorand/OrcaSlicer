@@ -1528,16 +1528,34 @@ void TreeSupport::generate_toolpaths()
                     }
                     else {
                         // base_areas
-                        Flow flow               = (layer_id == 0 && m_raft_layers == 0) ? m_object->print()->brim_flow() : support_flow;
+                        bool support_base_on_bed = (layer_id == 0 && m_raft_layers == 0);
+                        Flow flow = support_base_on_bed ? m_support_params.first_layer_flow : support_flow;
                         bool need_infill = with_infill;
                         if(m_object_config->support_base_pattern==smpDefault)
                             need_infill &= area_group.need_infill;
-                        std::shared_ptr<Fill> filler_support = std::shared_ptr<Fill>(Fill::new_from_type(layer_id == 0 ? ipConcentric : m_support_params.base_fill_pattern));
+                        std::shared_ptr<Fill> filler_support = std::shared_ptr<Fill>(Fill::new_from_type(m_support_params.base_fill_pattern));
                         filler_support->set_bounding_box(bbox_object);
-                        filler_support->spacing = support_spacing * support_density; // constant spacing to align support infill lines
+
+                        filler_support->spacing =
+                            support_base_on_bed ?
+                            flow.spacing() : // Orca: On the bed-contacting support base layer, use first-layer flow spacing directly.
+                            support_spacing * support_density; // constant spacing to align support infill lines
                         filler_support->angle = Geometry::deg2rad(object_config.support_angle.value);
 
                         Polygons loops = to_polygons(poly);
+                        // Orca: In Hybrid mode, apply first-layer expansion only to the
+                        // normal-support subset (need_infill), not tree-node-only subsets.
+                        if (support_base_on_bed && m_support_params.support_style == smsTreeHybrid && need_infill &&
+                            m_object_config->raft_first_layer_expansion.value > 0.f) {
+                            const float inflate_factor_1st_layer = float(scale_(m_object_config->raft_first_layer_expansion.value));
+                            Polygons trimming = offset(m_object->layers().front()->lslices, float(scale_(m_support_params.gap_xy_first_layer)),
+                                                       SUPPORT_SURFACES_OFFSET_PARAMETERS);
+                            // Expand in multiple steps while re-trimming against the object to avoid leaking into object walls.
+                            const int nsteps = std::max(5, int(ceil(inflate_factor_1st_layer / m_support_params.first_layer_flow.scaled_width())));
+                            const float step = inflate_factor_1st_layer / nsteps;
+                            for (int i = 0; i < nsteps; ++i)
+                                loops = diff(expand(loops, step), trimming);
+                        }
                         if (layer_id == 0) {
                             float density = float(m_object_config->raft_first_layer_density.value * 0.01);
                             fill_expolygons_with_sheath_generate_paths(ts_layer->support_fills.entities, loops, filler_support.get(), density, erSupportMaterial, flow,
@@ -1574,7 +1592,7 @@ void TreeSupport::generate_toolpaths()
                     // strengthen lightnings while it may make support harder. decide to enable it or not. if yes, proper values for params are remained to be tested
                     auto& lightning_layer = generator->getTreesForLayer(printZ_to_lightninglayer[print_z]);
 
-                    Flow       flow  = (layer_id == 0 && m_raft_layers == 0) ? m_object->print()->brim_flow() :support_flow;
+                    Flow       flow  = (layer_id == 0 && m_raft_layers == 0) ? m_support_params.first_layer_flow : support_flow;
                     ExPolygons areas = offset_ex(ts_layer->base_areas, -flow.scaled_spacing());
 
                     for (auto& area : areas)
