@@ -4538,6 +4538,10 @@ void TabPrinter::build_fff()
         optgroup->append_single_option_line("extruder_clearance_height_to_rod", "printer_basic_information_extruder_clearance#height-to-rod");
         optgroup->append_single_option_line("extruder_clearance_height_to_lid", "printer_basic_information_extruder_clearance#height-to-lid");
 
+        optgroup = page->new_optgroup(L("Initial Z Clearance"), "param_extruder_clearance");
+        optgroup->append_single_option_line("initial_z_clearance_height");
+        optgroup->append_single_option_line("initial_z_clearance_placement");
+
         optgroup = page->new_optgroup(L("Adaptive bed mesh"), "param_adaptive_mesh");
         optgroup->append_single_option_line("bed_mesh_min", "printer_basic_information_adaptive_bed_mesh#bed-mesh");
         optgroup->append_single_option_line("bed_mesh_max", "printer_basic_information_adaptive_bed_mesh#bed-mesh");
@@ -5450,6 +5454,8 @@ void TabPrinter::toggle_options()
 
         const bool support_parallel_printheads = printer_cfg.opt_bool("support_parallel_printheads");
         toggle_line("parallel_printheads_count", support_parallel_printheads);
+
+        toggle_option("initial_z_clearance_placement", m_config->opt_float("initial_z_clearance_height") > 0.);
     }
     
 
