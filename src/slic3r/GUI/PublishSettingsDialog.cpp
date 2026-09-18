@@ -49,14 +49,13 @@ wxStaticText* add_checkbox_label(wxWindow* parent,
                                  ::CheckBox* check,
                                  const wxString& label,
                                  const wxString& tooltip,
-                                 int label_width = 0,
-                                 bool align_checkbox_top = false)
+                                 int label_width = 0)
 {
     check->SetToolTip(tooltip);
-    sizer->Add(check, 0, align_checkbox_top ? wxALIGN_TOP : wxALIGN_CENTER_VERTICAL);
+    sizer->Add(check, 0, wxALIGN_CENTER_VERTICAL | wxTOP | wxBOTTOM, parent->FromDIP(2));
 
     auto* text = new wxStaticText(parent, wxID_ANY, label);
-    text->SetFont(Label::Body_13);
+    text->SetFont(Label::Body_14);
     text->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#363636")));
     if (label_width > 0) {
         text->SetMinSize(wxSize(label_width, -1));
@@ -80,7 +79,7 @@ wxStaticText* add_checkbox_label(wxWindow* parent,
     text->Bind(wxEVT_LEFT_DCLICK, [toggle](wxMouseEvent&) {
         toggle();
     });
-    sizer->Add(text, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, parent->FromDIP(2));
+    sizer->Add(text, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, parent->FromDIP(5));
     return text;
 }
 
@@ -738,12 +737,9 @@ PublishSettingsDialog::PublishSettingsDialog(wxWindow* parent,
     // Guide links, bottom-left, sharing the footer row with the OK/Cancel buttons (pushed right).
     wxBoxSizer* links_sizer = new wxBoxSizer(wxVERTICAL);
     auto* wiki_link = new HyperLink(this, _L("Wiki Guide"), "https://www.orcaslicer.com/wiki/publishing_3mf/publish_3mf.html");
-    wiki_link->SetFont(Label::Body_13);
     auto* video_link = new HyperLink(this, _L("Video Guide"), "https://www.youtube.com/watch?v=-xt1N29UIOg");
-    video_link->SetFont(Label::Body_13);
-    links_sizer->Add(wiki_link, 0, wxALIGN_LEFT);
-    links_sizer->Add(video_link, 0,
-                     wxTOP | wxALIGN_LEFT, FromDIP(4));
+    links_sizer->Add(wiki_link , 0, wxALIGN_LEFT);
+    links_sizer->Add(video_link, 0, wxTOP | wxALIGN_LEFT, FromDIP(4));
 
     wxBoxSizer* footer = new wxBoxSizer(wxHORIZONTAL);
     footer->Add(links_sizer, 0, wxALIGN_CENTER_VERTICAL);
@@ -1239,7 +1235,7 @@ size_t PublishSettingsDialog::category_index_for(
     category.info->SetFont(Label::Body_13);
     category.list_sizer->Add(category.info, 1, wxALIGN_CENTER_HORIZONTAL | wxALL, FromDIP(10));
     category.info->Hide();
-    page_sizer->Add(category.scroll, 1, wxEXPAND | wxALL, FromDIP(4));
+    page_sizer->Add(category.scroll, 1, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(4));
     // A material slot starts disabled: its rows (and its Full Publish line) stay hidden until
     // "Enable" is checked.
     if (section == Section::Material)
@@ -1300,7 +1296,7 @@ size_t PublishSettingsDialog::subcategory_index_for(size_t category_index, const
         sub.header->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#363636")));
         auto* wrap = new wxBoxSizer(wxVERTICAL);
         wrap->Add(sub.header, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(6));
-        sub.item = category.list_sizer->Add(wrap, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(22));
+        sub.item = category.list_sizer->Add(wrap, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(5));
     }
     category.subs.push_back(std::move(sub));
     return category.subs.size() - 1;
@@ -1337,11 +1333,11 @@ void PublishSettingsDialog::add_row_ui(const std::string& key,
     });
     auto* row_sizer = new wxBoxSizer(wxHORIZONTAL);
     current.check_label = add_checkbox_label(category.scroll, row_sizer, current.check, label + ":", wxEmptyString,
-                                             20 * wxGetApp().em_unit(), true);
+                                             24 * wxGetApp().em_unit());
     // The value is read-only text (incl. the Type row: the published type is the slot's
     // normalized type, not author-editable).
     current.value_label = new wxStaticText(category.scroll, wxID_ANY, value, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
-    current.value_label->SetFont(Label::Body_13);
+    current.value_label->SetFont(Label::Body_14);
     current.value_label->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#262E30")));
     current.value_label->SetToolTip(unit.IsEmpty() ? value : value + " " + unit);
     if (kind == RowKind::Color && !value.IsEmpty()) {
@@ -1352,14 +1348,14 @@ void PublishSettingsDialog::add_row_ui(const std::string& key,
             row_sizer->Add(current.color_chip, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
         }
     }
-    row_sizer->Add(current.value_label, 0, wxALIGN_BOTTOM | wxLEFT, FromDIP(8));
+    row_sizer->Add(current.value_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
     if (!unit.IsEmpty()) {
         current.unit_label = new wxStaticText(category.scroll, wxID_ANY, unit);
-        current.unit_label->SetFont(Label::Body_13);
-        current.unit_label->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#363636")));
-        row_sizer->Add(current.unit_label, 0, wxALIGN_BOTTOM | wxLEFT, FromDIP(4));
+        current.unit_label->SetFont(Label::Body_14);
+        current.unit_label->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#6B6B6B")));
+        row_sizer->Add(current.unit_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(4));
     }
-    current.item = category.list_sizer->Add(row_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(38));
+    current.item = category.list_sizer->Add(row_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(5));
     category.rows.push_back(row_index);
     category.subs[subcategory_index].rows.push_back(row_index);
 }
