@@ -5780,7 +5780,7 @@ void GLGizmoTextureDisplacement::on_render_input_window(float x, float y, float 
             wf_toggle = true;
 
         const std::string auto_label = _u8L("Auto");
-        const float       auto_w     = frame_h * 0.78f + style.ItemInnerSpacing.x + ImGui::CalcTextSize(auto_label.c_str()).x;
+        const float       auto_w     = frame_h * 0.78f /*ratio from BBLCheckbox*/ + style.ItemInnerSpacing.x + ImGui::CalcTextSize(auto_label.c_str()).x;
         ImGui::SameLine();
         ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - auto_w));
         if (m_imgui->bbl_checkbox(wxString::FromUTF8(auto_label) + "##auto_update", m_auto_update) && m_auto_update)
@@ -5843,7 +5843,7 @@ void GLGizmoTextureDisplacement::on_render_input_window(float x, float y, float 
                     list->AddCircleFilled(ImVec2(x + w * (0.3f + 0.4f * col), y + h * 0.5f + float(row - 1) * 4.f * r), r, tint);
         }
     };
-    const auto drag_tint = [](int alpha) { return ImGui::GetColorU32(ImGuiCol_TextDisabled, float(alpha) / 255.f); };
+    const auto drag_tint = [dark](int alpha) { return dark ? IM_COL32(255, 255, 255, alpha) : IM_COL32(90, 90, 90, alpha); };
 
     const float grip_w = std::round(m_imgui->scaled(0.7f));
     // Six-dot handle that drags a layer onto another one to reorder the stack.
